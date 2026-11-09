@@ -701,6 +701,45 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // 9. SMOOTH SCROLL OFFSET CORRECTION FOR ANCHORS
   // ==========================================================================
+  // Pages: every menu button swaps the page inside this same tab (no new tab / link).
+  // work = Reels + Ads Design (View My Work), plus About, Skills, Experience, Results and Contact pages.
+  (function () {
+    const root = document.documentElement;
+    const MAP = { work: 'work', reels: 'work', ads: 'work', about: 'about', skills: 'skills', experience: 'experience',
+                  projects: 'projects', results: 'projects', contact: 'contact', credentials: 'contact' };
+    const current = function () { return root.getAttribute('data-view'); };
+    function relayout() { void document.body.offsetHeight; window.dispatchEvent(new Event('resize')); window.dispatchEvent(new Event('scroll')); }   // scroll: refresh the active menu entry
+    function showView(v, push) {
+      root.setAttribute('data-view', v);
+      root.classList.remove('site-locked');
+      if (push && window.location.hash !== '#' + v) { try { history.pushState({ view: v }, '', '#' + v); } catch (_) {} }
+      relayout();
+    }
+    function showHome(push) {
+      root.removeAttribute('data-view');
+      root.classList.add('site-locked');           // back to the landing page: hero only
+      if (push) { try { history.pushState({ view: 'home' }, '', window.location.pathname + window.location.search); } catch (_) {} }
+      relayout();
+      window.scrollTo(0, 0);
+    }
+    document.addEventListener('click', function (e) {
+      const a = e.target.closest && e.target.closest('a[href^="#"]');
+      if (!a) return;
+      const id = a.getAttribute('href').slice(1);
+      if (a.classList.contains('back-to-top') && current()) {          // inside a page: just scroll up
+        e.preventDefault(); e.stopImmediatePropagation(); window.scrollTo({ top: 0, behavior: 'smooth' }); return;
+      }
+      if (id === 'hero') { if (current()) showHome(true); return; }
+      const v = MAP[id];
+      if (v && current() !== v) showView(v, true);
+    }, true);
+    window.addEventListener('popstate', function () {
+      const v = MAP[window.location.hash.slice(1)];
+      if (v) showView(v, false); else if (current()) showHome(false);
+    });
+    if (current()) relayout();
+  })();
+
   document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     anchor.addEventListener('click', function(e) {
       const targetId = this.getAttribute('href');
@@ -791,7 +830,7 @@ document.addEventListener('DOMContentLoaded', () => {
       top = Math.max(top, window.scrollY + section.getBoundingClientRect().top - headerH + 40 - Math.max(0, free - r.height - 40));
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
       carousel.dispatchEvent(new CustomEvent('reels:replay'));   // opening animation plays every time
-      try { history.replaceState(null, '', '#reels'); } catch (err) { /* ignore */ }
+      try { history.replaceState({ view: 'work' }, '', '#work'); } catch (err) { /* ignore */ }
     });
   })();
 
@@ -1141,4 +1180,171 @@ document.addEventListener('DOMContentLoaded', () => {
     observer.observe(target);
   })();
 
+
+  // ==========================================================================
+  // STATIC ADS VIEWER (lightbox)
+  // ==========================================================================
+  (function () {
+    const grid = document.getElementById('ads-grid');
+    const box = document.getElementById('ad-lightbox');
+    if (!grid || !box) return;
+    const cards = Array.from(grid.querySelectorAll('.ad-card'));
+    const img = box.querySelector('.ad-lb-img');
+    const title = box.querySelector('.ad-lb-title');
+    const count = box.querySelector('.ad-lb-count');
+    let index = 0, opener = null, startX = null;
+
+    function show(i) {
+      index = (i + cards.length) % cards.length;
+      const src = cards[index].querySelector('img');
+      img.src = src.getAttribute('src');
+      img.alt = src.alt;
+      title.textContent = cards[index].querySelector('.ad-name').textContent;
+      count.textContent = (index + 1) + ' / ' + cards.length;
+    }
+    function open(i, trigger) {
+      opener = trigger;
+      show(i);
+      const sbw = window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.overflow = 'hidden';
+      if (sbw > 0) document.body.style.paddingRight = sbw + 'px';
+      box.hidden = false;
+      void box.offsetWidth;
+      box.classList.add('is-open');
+      box.querySelector('.ad-lb-close').focus();
+    }
+    function close() {
+      box.classList.remove('is-open');
+      window.setTimeout(function () {
+        box.hidden = true;
+        document.body.style.overflow = '';
+        document.body.style.paddingRight = '';
+        if (opener) opener.focus();
+      }, 300);
+    }
+    // Deterrents: no right-click menu or dragging on the ads section / viewer.
+    [grid, box].forEach(function (el) {
+      el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      el.addEventListener('dragstart', function (e) { e.preventDefault(); });
+    });
+    // ---- Curved slider: slots ride a cylinder, drift sideways, drag to scrub ----
+    const N = cards.length;
+    const COPIES = 3;
+    cards.forEach(function (c, i) { c.dataset.i = i; });
+    const slots = cards.slice();
+    for (let k = 1; k < COPIES; k++) {
+      cards.forEach(function (c) {
+        const cl = c.cloneNode(true);
+        cl.setAttribute('aria-hidden', 'true'); cl.tabIndex = -1;
+        grid.appendChild(cl); slots.push(cl);
+      });
+    }
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let W = 0, CW = 230, SP = 250, R = 900, TOTAL = 0, off = 0, vel = 0, last = 0, raf = 0;
+    let inView = false, hovering = false, dragging = false, moved = 0, lastX = 0, lastT = 0;
+    const AUTO = -34;   // px per second (drift to the left)
+
+    function measure() {
+      W = grid.clientWidth;
+      CW = W < 700 ? W * 0.6 : Math.min(340, W * 0.27);
+      SP = CW * 1.1;
+      R = Math.max(520, W * 0.8);
+      TOTAL = SP * slots.length;
+      grid.style.setProperty('--cw', CW + 'px');
+      grid.style.height = Math.round(CW * 1.25 + 110) + 'px';
+    }
+    function render() {
+      const half = TOTAL / 2, vis = W / 2 + CW;
+      for (let j = 0; j < slots.length; j++) {
+        let s = j * SP + off;
+        s = ((s + half) % TOTAL + TOTAL) % TOTAL - half;
+        const el = slots[j];
+        if (Math.abs(s) > vis) { if (el.style.visibility !== 'hidden') el.style.visibility = 'hidden'; continue; }
+        const th = Math.max(-1.25, Math.min(1.25, s / R));
+        const x = R * Math.sin(th), z = R * (1 - Math.cos(th));
+        el.style.visibility = 'visible';
+        el.style.zIndex = String(1000 - Math.round(Math.abs(s)));
+        el.style.transform = 'translate(-50%,-50%) translate3d(' + x.toFixed(1) + 'px,0,' + z.toFixed(1) + 'px) rotateY(' + (th * 57.2958).toFixed(2) + 'deg)';
+      }
+    }
+    function frame(t) {
+      raf = requestAnimationFrame(frame);
+      const dt = Math.min(0.05, (t - (last || t)) / 1000); last = t;
+      if (!dragging) {
+        const target = (reduce || hovering) ? 0 : AUTO;
+        vel += (target - vel) * Math.min(1, dt * 3);   // ease back to drift speed
+        off += vel * dt;
+      }
+      render();
+    }
+    function start() { if (!raf && inView && !document.hidden) { last = 0; raf = requestAnimationFrame(frame); } }
+    function halt() { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+    measure(); render();
+    window.addEventListener('resize', function () { measure(); render(); });
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (en) { inView = en[0].isIntersecting; if (inView) start(); else halt(); }, { threshold: 0.1 }).observe(grid);
+    } else { inView = true; start(); }
+    document.addEventListener('visibilitychange', function () { if (document.hidden) halt(); else start(); });
+    grid.addEventListener('mouseenter', function () { hovering = true; });
+    grid.addEventListener('mouseleave', function () { hovering = false; });
+
+    grid.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      dragging = true; moved = 0; lastX = e.clientX; lastT = performance.now(); vel = 0;
+      grid.classList.add('is-dragging');
+      grid._pid = e.pointerId;
+    });
+    grid.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      const now = performance.now(), dx = e.clientX - lastX;
+      moved += Math.abs(dx); off += dx;
+      if (moved > 6 && grid._pid !== null) { try { grid.setPointerCapture(grid._pid); } catch (_) {} grid._pid = null; }
+      const dtm = Math.max(1, now - lastT);
+      vel = 0.6 * vel + 0.4 * (dx / dtm * 1000);
+      lastX = e.clientX; lastT = now;
+      render();
+    });
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false; grid.classList.remove('is-dragging');
+      vel = Math.max(-1500, Math.min(1500, vel));
+      if (!raf) render();
+    }
+    grid.addEventListener('pointerup', endDrag);
+    grid.addEventListener('pointercancel', endDrag);
+
+    function centerSlot() {
+      const half = TOTAL / 2; let best = 0, bd = 1e9;
+      slots.forEach(function (el, j) {
+        let s = ((j * SP + off + half) % TOTAL + TOTAL) % TOTAL - half;
+        if (Math.abs(s) < bd) { bd = Math.abs(s); best = j; }
+      });
+      return best;
+    }
+    grid.addEventListener('click', function (e) {
+      const c = e.target.closest ? e.target.closest('.ad-card') : null;
+      if (!c || moved > 6) return;
+      open(Number(c.dataset.i), c);
+    });
+    const openBtn = document.getElementById('ads-open');
+    if (openBtn) openBtn.addEventListener('click', function () {
+      const c = slots[centerSlot()]; open(Number(c.dataset.i), openBtn);
+    });
+    box.querySelector('.ad-lb-close').addEventListener('click', close);
+    box.querySelector('.ad-lb-prev').addEventListener('click', function () { show(index - 1); });
+    box.querySelector('.ad-lb-next').addEventListener('click', function () { show(index + 1); });
+    box.addEventListener('click', function (e) { if (e.target === box) close(); });
+    document.addEventListener('keydown', function (e) {
+      if (box.hidden) return;
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft') show(index - 1);
+      else if (e.key === 'ArrowRight') show(index + 1);
+    });
+    box.addEventListener('touchstart', function (e) { startX = e.touches[0].clientX; }, { passive: true });
+    box.addEventListener('touchend', function (e) {
+      if (startX === null) return;
+      const dx = e.changedTouches[0].clientX - startX; startX = null;
+      if (Math.abs(dx) > 50) show(index + (dx < 0 ? 1 : -1));
+    });
+  })();
 });

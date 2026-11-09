@@ -3446,7 +3446,7 @@ ul, ol {
 .reel-stage {
   position: relative;
   padding: 1.5rem 0 2.5rem;
-  touch-action: pan-y;          /* vertical page scroll stays native, horizontal swipes go to JS */
+  touch-action: pan-y pinch-zoom;          /* vertical page scroll and pinch-zoom stay native, horizontal swipes go to JS */
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
@@ -4759,7 +4759,7 @@ html.intro-chrome .hero-profile-card > .hero-ambient-glow    { filter: blur(28px
   perspective: 1200px;
   overflow: hidden;
   cursor: grab;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
           mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
 }
@@ -6080,7 +6080,7 @@ html[data-view="contact"] section[id]:not(#credentials):not(#contact) { display:
             </div>
             <div class="logo-text">
               <span class="logo-name">Fady Azmy</span>
-              <span class="logo-role">Junior Media Buyer</span>
+              <span class="logo-role">Social Media Manager</span>
             </div>
           </a>
           <p class="footer-tagline">
